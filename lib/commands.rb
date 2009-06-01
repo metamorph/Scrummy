@@ -1,69 +1,62 @@
 # The commands used to extract information from a Sprint.
 module Scrummy
-class Commander
 
-	def initialize(sprint)
-		@sprint = sprint
-		@handlers = {
-			:info => proc{|*args| do_info(*args)}
-		}
-	end
 
-	def process(input)
-		cmd, *args = input
-		if handler = @handlers[cmd.to_sym]
-			handler.call(args)
-		else
-			raise "No handler defined for command #{cmd}"
-		end
-	end
+  # Holds command entries.
+  class CommandRepository
 
-	private
+    require 'singleton'
+    include Singleton
 
-	def do_info(*args)
-		puts <<-END
-Sprint: #{@sprint.name}
-Score: #{@sprint.score}
-Focus: #{@sprint.focus_factor}
-Goal: #{@sprint.goal}
-Participants: #{@sprint.participants.join(", ")}
-Schedule: #{@sprint.schedule.first} to #{@sprint.schedule.last} (#{@sprint.schedule.size} days).
+    def register(name, &block)
+      mappings[name.to_sym] = block
+    end
 
-Stories:
-#{@sprint.stories.map{|s| pp_story(s)}.join("\n=====\n")}
-		END
-	end
+    def get(name)
+      cmd = mappings[name.to_sym]
+      unless cmd
+        puts "Unknown command: #{name}"
+        cmd = self.to_proc
+      end
+      return cmd
+    end
 
-	def pp_story(story)
-		<<-END
-## #{story.name} ##
-#{story.description}
-Score: #{story.score}
-Tasks:
-#{story.tasks.map{|t| pp_task(t)}.join("\n---\n")}
-		END
-	end
+    # Create a proc of ourself.
+    # This is the 'help' command.
+    def to_proc
+      return Proc.new do |*args|
+        puts "This is the help command that will display available commands"
+      end
+    end
 
-	def pp_task(task)
-		<<-END
-	[#{task.key}]: #{task.name}
-	Score: #{task.score}
-	Description: #{task.description}
-		END
-	end
+    private
 
-end
+    def mappings
+      @mappings ||= {}
+    end
 
-# Path the Sprint class.
-class Sprint
-	class << self
-		alias :orig_define :define
+    # Register the 'help' command.
+    instance.register(:help, &CommandRepository.instance)
+  end
 
-		def define(name, &block)
-			commander = Commander.new(orig_define(name, &block))
-			commander.process(ARGV)
-		end
-	end
-end
+  # Load all files in 'commands'
+  Dir[File.join(File.dirname(__FILE__), "commands", "*.rb")].each do |f|
+    require f
+  end
+
+  # Patch the Sprint class.
+  class Sprint
+    class << self
+      alias :orig_define :define
+      def define(name, &block)
+        sprint = orig_define(name, &block)
+        # Find and execute the command.
+        command_name, *args = ARGV
+        command_name = :help unless command_name
+        command = CommandRepository.instance.get(command_name)
+        command.call(sprint, args)
+      end
+    end
+  end
 
 end
